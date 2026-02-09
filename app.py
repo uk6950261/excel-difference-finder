@@ -62,7 +62,9 @@ if st.button("🚀 Compare Records") and keys:
 
     k1 = df1[keys].astype(str)
     k2 = df2[keys].astype(str)
-
+# ---- Remove duplicate records before compare ----
+    k1 = k1.drop_duplicates()
+    k2 = k2.drop_duplicates()   
     merged = k1.merge(k2, how="outer", indicator=True)
 
     only1 = merged[merged["_merge"] == "left_only"]
