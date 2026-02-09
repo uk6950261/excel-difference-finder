@@ -3,85 +3,111 @@ import pandas as pd
 
 st.set_page_config(page_title="Excel Difference Finder", layout="wide")
 
-st.title("📊 Excel Difference Finder Tool")
+st.title("📊 Excel Difference Finder (Universal)")
+st.write("Upload two Excel files and compare any column you want.")
+
+# -------- FILE UPLOAD --------
 
 file1 = st.file_uploader("Upload First Excel File", type=["xlsx"])
 file2 = st.file_uploader("Upload Second Excel File", type=["xlsx"])
 
-def normalize_cols(df):
-    df.columns = df.columns.str.strip()
-    return df
-
 if file1 and file2:
+
     try:
-        df1 = normalize_cols(pd.read_excel(file1))
-        df2 = normalize_cols(pd.read_excel(file2))
+        df1 = pd.read_excel(file1)
+        df2 = pd.read_excel(file2)
     except Exception as e:
-        st.error(f"File read error: {e}")
+        st.error("Excel read error — check file format")
         st.stop()
 
-    st.success("Files loaded successfully")
+    st.success("Files loaded successfully ✅")
 
-    st.subheader("Preview File 1")
-    st.dataframe(df1.head())
+    st.subheader("Preview")
 
-    st.subheader("Preview File 2")
-    st.dataframe(df2.head())
+    colA, colB = st.columns(2)
+    with colA:
+        st.write("File 1 Preview")
+        st.dataframe(df1.head())
 
-    common_cols = sorted(list(set(df1.columns) & set(df2.columns)))
+    with colB:
+        st.write("File 2 Preview")
+        st.dataframe(df2.head())
 
-    mode = st.selectbox("Select Compare Mode", [
-        "Invoice Difference",
-        "GSTIN Difference",
-        "Column Difference",
-        "Full Row Difference",
-        "Duplicate Finder"
-    ])
+    # -------- COLUMN SELECT MODE --------
 
-    # ---------- INVOICE ----------
-    if mode == "Invoice Difference":
-        col = st.selectbox("Select Invoice Column", common_cols)
-        only1 = df1[~df1[col].isin(df2[col])]
-        only2 = df2[~df2[col].isin(df1[col])]
+    st.subheader("Select Compare Column")
 
-        st.write("Only in File 1")
-        st.dataframe(only1)
+    mode = st.radio(
+        "Choose how to select column:",
+        ["Select from dropdown", "Type column name"]
+    )
 
-        st.write("Only in File 2")
-        st.dataframe(only2)
+    if mode == "Select from dropdown":
+        col1 = st.selectbox("Column from File 1", df1.columns)
+        col2 = st.selectbox("Column from File 2", df2.columns)
+    else:
+        col1 = st.text_input("Column name in File 1")
+        col2 = st.text_input("Column name in File 2")
 
-    # ---------- GSTIN ----------
-    if mode == "GSTIN Difference":
-        gst_cols = [c for c in common_cols if "gst" in c.lower()]
-        if not gst_cols:
-            st.warning("No GST column found")
-        else:
-            col = st.selectbox("Select GST Column", gst_cols)
-            only1 = df1[~df1[col].isin(df2[col])]
-            only2 = df2[~df2[col].isin(df1[col])]
-            st.dataframe(only1)
-            st.dataframe(only2)
+    # -------- RUN COMPARE --------
 
-    # ---------- COLUMN ----------
-    if mode == "Column Difference":
-        col = st.selectbox("Select Column", common_cols)
-        only1 = df1[~df1[col].isin(df2[col])]
-        only2 = df2[~df2[col].isin(df1[col])]
-        st.write("Only in File 1")
-        st.dataframe(only1)
-        st.write("Only in File 2")
-        st.dataframe(only2)
+    if st.button("🚀 Run Compare"):
 
-    # ---------- FULL ROW ----------
-    if mode == "Full Row Difference":
-        merged = df1.merge(df2, how="outer", indicator=True)
-        st.dataframe(merged[merged["_merge"] != "both"])
+        if col1 not in df1.columns:
+            st.error("Column not found in File 1")
+            st.stop()
 
-    # ---------- DUPLICATE ----------
-    if mode == "Duplicate Finder":
-        col = st.selectbox("Select Column for Duplicate Check", df1.columns)
-        dups = df1[df1.duplicated(col, keep=False)]
-        st.dataframe(dups)
+        if col2 not in df2.columns:
+            st.error("Column not found in File 2")
+            st.stop()
+
+        s1 = set(df1[col1].astype(str))
+        s2 = set(df2[col2].astype(str))
+
+        only1 = sorted(list(s1 - s2))
+        only2 = sorted(list(s2 - s1))
+        common = sorted(list(s1 & s2))
+
+        st.subheader("Results")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Only in File 1", len(only1))
+        c2.metric("Only in File 2", len(only2))
+        c3.metric("Common Values", len(common))
+
+        # -------- SHOW TABLES --------
+
+        tab1, tab2, tab3 = st.tabs([
+            "Only File 1",
+            "Only File 2",
+            "Common"
+        ])
+
+        with tab1:
+            d1 = pd.DataFrame({col1: only1})
+            st.dataframe(d1)
+
+        with tab2:
+            d2 = pd.DataFrame({col2: only2})
+            st.dataframe(d2)
+
+        with tab3:
+            d3 = pd.DataFrame({"Common": common})
+            st.dataframe(d3)
+
+        # -------- DOWNLOAD --------
+
+        out = pd.concat([
+            pd.DataFrame({"Only_File1": only1}),
+            pd.DataFrame({"Only_File2": only2})
+        ], axis=1)
+
+        st.download_button(
+            "⬇ Download Difference Excel",
+            out.to_csv(index=False),
+            file_name="difference.csv"
+        )
 
 else:
-    st.info("Upload both Excel files to begin")
+    st.info("Upload both Excel files to begin.")
+
