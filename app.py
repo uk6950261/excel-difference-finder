@@ -1,4 +1,7 @@
 import streamlit as st
+st.markdown("""
+<meta name="google-site-verification" content="RL50Ymf_K5HFmDukgYPEKxwVD-UHlvx659nLZLlsGQ4" />
+""", unsafe_allow_html=True)
 import pandas as pd
 import difflib
 import numpy as np
