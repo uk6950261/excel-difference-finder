@@ -1,104 +1,94 @@
 import streamlit as st
 import pandas as pd
-import difflib
-import string
 
-st.set_page_config(page_title="Smart Excel Difference Finder", layout="wide")
+st.set_page_config(page_title="Excel Reconciliation PRO", layout="wide")
 
-st.title("📊 Smart Excel Difference Finder")
-st.write("Upload 2 Excel files → Type column letter/name/keyword → Get differences")
+st.title("📊 Excel Reconciliation PRO Tool")
 
 # -------- Upload --------
 
-f1 = st.file_uploader("Upload First Excel", type=["xlsx"])
-f2 = st.file_uploader("Upload Second Excel", type=["xlsx"])
+file1 = st.file_uploader("Upload Excel File 1", type=["xlsx"])
+file2 = st.file_uploader("Upload Excel File 2", type=["xlsx"])
 
-if not (f1 and f2):
+if not file1:
     st.stop()
 
-df1 = pd.read_excel(f1)
-df2 = pd.read_excel(f2)
+xls1 = pd.ExcelFile(file1)
 
-st.success("Files loaded ✅")
+# -------- MULTI SHEET SELECT (FILE 1) --------
 
-st.write("File1 columns:", list(df1.columns))
-st.write("File2 columns:", list(df2.columns))
+sheets1 = st.multiselect(
+    "Select one or more sheets from File 1",
+    xls1.sheet_names
+)
 
-# -------- Smart Column Finder --------
+if not sheets1:
+    st.stop()
 
-user_key = st.text_input("Type column letter OR name OR keyword")
+df1_list = [xls1.parse(s) for s in sheets1]
+df1 = pd.concat(df1_list, ignore_index=True)
 
-def col_from_letter(letter, cols):
-    i = string.ascii_uppercase.find(letter.upper())
-    if 0 <= i < len(cols):
-        return cols[i]
-    return None
+# -------- FILE 2 SHEET --------
 
-def fuzzy(keyword, cols):
-    m = difflib.get_close_matches(
-        keyword.lower(),
-        [c.lower() for c in cols],
-        n=1,
-        cutoff=0.4
-    )
-    if m:
-        for c in cols:
-            if c.lower() == m[0]:
-                return c
-    return None
+if file2:
+    xls2 = pd.ExcelFile(file2)
+    sheet2 = st.selectbox("Select sheet from File 2", xls2.sheet_names)
+    df2 = xls2.parse(sheet2)
+else:
+    sheet2 = st.selectbox("Or select compare sheet from File 1", xls1.sheet_names)
+    df2 = xls1.parse(sheet2)
 
-def smart_find(key, cols):
-    return (
-        col_from_letter(key, cols)
-        or (key if key in cols else None)
-        or fuzzy(key, cols)
-    )
+st.success("Sheets loaded and combined ✅")
 
-# -------- Run Compare --------
+st.write("Combined File1 Rows:", len(df1))
+st.write("Compare Sheet Rows:", len(df2))
 
-if st.button("🚀 Compare") and user_key:
-
-    c1 = smart_find(user_key, df1.columns)
-    c2 = smart_find(user_key, df2.columns)
-
-    if not c1 or not c2:
-        st.error("No matching column found")
-        st.stop()
-
-    st.success(f"Matched → {c1}  |  {c2}")
-
-    s1 = set(df1[c1].astype(str))
-    s2 = set(df2[c2].astype(str))
-
-    only1 = sorted(list(s1 - s2))
-    only2 = sorted(list(s2 - s1))
-    common = sorted(list(s1 & s2))
-
-    a,b,c = st.columns(3)
-    a.metric("Only File1", len(only1))
-    b.metric("Only File2", len(only2))
-    c.metric("Common", len(common))
-
-    st.subheader("Only in File1")
-    st.dataframe(pd.DataFrame({c1: only1}))
-
-    st.subheader("Only in File2")
-    st.dataframe(pd.DataFrame({c2: only2}))
-
-# -------- Row Compare (auto) --------
-
-st.subheader("🧾 Row Difference (Auto All Common Columns)")
+# -------- COMMON COLUMNS --------
 
 common_cols = list(set(df1.columns) & set(df2.columns))
 
-if st.button("Compare Full Rows"):
+st.write("Common columns available:", common_cols)
 
-    r1 = df1[common_cols].astype(str)
-    r2 = df2[common_cols].astype(str)
+# -------- MULTI COLUMN MATCH --------
 
-    merged = r1.merge(r2, how="outer", indicator=True)
-    diff = merged[merged["_merge"] != "both"]
+keys = st.multiselect(
+    "Select match columns (Invoice + Party + Amount etc.)",
+    common_cols
+)
 
-    st.metric("Row Differences", len(diff))
-    st.dataframe(diff)
+# -------- COMPARE --------
 
+if st.button("🚀 Compare Records") and keys:
+
+    k1 = df1[keys].astype(str)
+    k2 = df2[keys].astype(str)
+
+    merged = k1.merge(k2, how="outer", indicator=True)
+
+    only1 = merged[merged["_merge"] == "left_only"]
+    only2 = merged[merged["_merge"] == "right_only"]
+
+    st.subheader("Results")
+
+    c1, c2 = st.columns(2)
+    c1.metric("Only in File1 Sheets", len(only1))
+    c2.metric("Only in Compare Sheet", len(only2))
+
+    st.subheader("Missing in Compare Sheet")
+    st.dataframe(only1)
+
+    st.subheader("Missing in File1 Sheets")
+    st.dataframe(only2)
+
+    # -------- DOWNLOAD --------
+
+    out = pd.concat([
+        only1.assign(Source="Only_File1"),
+        only2.assign(Source="Only_File2")
+    ])
+
+    st.download_button(
+        "⬇ Download Difference Report",
+        out.to_csv(index=False),
+        file_name="multi_sheet_diff.csv"
+    )
