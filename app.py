@@ -1,113 +1,104 @@
 import streamlit as st
 import pandas as pd
+import difflib
+import string
 
-st.set_page_config(page_title="Excel Difference Finder", layout="wide")
+st.set_page_config(page_title="Smart Excel Difference Finder", layout="wide")
 
-st.title("📊 Excel Difference Finder (Universal)")
-st.write("Upload two Excel files and compare any column you want.")
+st.title("📊 Smart Excel Difference Finder")
+st.write("Upload 2 Excel files → Type column letter/name/keyword → Get differences")
 
-# -------- FILE UPLOAD --------
+# -------- Upload --------
 
-file1 = st.file_uploader("Upload First Excel File", type=["xlsx"])
-file2 = st.file_uploader("Upload Second Excel File", type=["xlsx"])
+f1 = st.file_uploader("Upload First Excel", type=["xlsx"])
+f2 = st.file_uploader("Upload Second Excel", type=["xlsx"])
 
-if file1 and file2:
+if not (f1 and f2):
+    st.stop()
 
-    try:
-        df1 = pd.read_excel(file1)
-        df2 = pd.read_excel(file2)
-    except Exception as e:
-        st.error("Excel read error — check file format")
-        st.stop()
+df1 = pd.read_excel(f1)
+df2 = pd.read_excel(f2)
 
-    st.success("Files loaded successfully ✅")
+st.success("Files loaded ✅")
 
-    st.subheader("Preview")
+st.write("File1 columns:", list(df1.columns))
+st.write("File2 columns:", list(df2.columns))
 
-    colA, colB = st.columns(2)
-    with colA:
-        st.write("File 1 Preview")
-        st.dataframe(df1.head())
+# -------- Smart Column Finder --------
 
-    with colB:
-        st.write("File 2 Preview")
-        st.dataframe(df2.head())
+user_key = st.text_input("Type column letter OR name OR keyword")
 
-    # -------- COLUMN SELECT MODE --------
+def col_from_letter(letter, cols):
+    i = string.ascii_uppercase.find(letter.upper())
+    if 0 <= i < len(cols):
+        return cols[i]
+    return None
 
-    st.subheader("Select Compare Column")
+def fuzzy(keyword, cols):
+    m = difflib.get_close_matches(
+        keyword.lower(),
+        [c.lower() for c in cols],
+        n=1,
+        cutoff=0.4
+    )
+    if m:
+        for c in cols:
+            if c.lower() == m[0]:
+                return c
+    return None
 
-    mode = st.radio(
-        "Choose how to select column:",
-        ["Select from dropdown", "Type column name"]
+def smart_find(key, cols):
+    return (
+        col_from_letter(key, cols)
+        or (key if key in cols else None)
+        or fuzzy(key, cols)
     )
 
-    if mode == "Select from dropdown":
-        col1 = st.selectbox("Column from File 1", df1.columns)
-        col2 = st.selectbox("Column from File 2", df2.columns)
-    else:
-        col1 = st.text_input("Column name in File 1")
-        col2 = st.text_input("Column name in File 2")
+# -------- Run Compare --------
 
-    # -------- RUN COMPARE --------
+if st.button("🚀 Compare") and user_key:
 
-    if st.button("🚀 Run Compare"):
+    c1 = smart_find(user_key, df1.columns)
+    c2 = smart_find(user_key, df2.columns)
 
-        if col1 not in df1.columns:
-            st.error("Column not found in File 1")
-            st.stop()
+    if not c1 or not c2:
+        st.error("No matching column found")
+        st.stop()
 
-        if col2 not in df2.columns:
-            st.error("Column not found in File 2")
-            st.stop()
+    st.success(f"Matched → {c1}  |  {c2}")
 
-        s1 = set(df1[col1].astype(str))
-        s2 = set(df2[col2].astype(str))
+    s1 = set(df1[c1].astype(str))
+    s2 = set(df2[c2].astype(str))
 
-        only1 = sorted(list(s1 - s2))
-        only2 = sorted(list(s2 - s1))
-        common = sorted(list(s1 & s2))
+    only1 = sorted(list(s1 - s2))
+    only2 = sorted(list(s2 - s1))
+    common = sorted(list(s1 & s2))
 
-        st.subheader("Results")
+    a,b,c = st.columns(3)
+    a.metric("Only File1", len(only1))
+    b.metric("Only File2", len(only2))
+    c.metric("Common", len(common))
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Only in File 1", len(only1))
-        c2.metric("Only in File 2", len(only2))
-        c3.metric("Common Values", len(common))
+    st.subheader("Only in File1")
+    st.dataframe(pd.DataFrame({c1: only1}))
 
-        # -------- SHOW TABLES --------
+    st.subheader("Only in File2")
+    st.dataframe(pd.DataFrame({c2: only2}))
 
-        tab1, tab2, tab3 = st.tabs([
-            "Only File 1",
-            "Only File 2",
-            "Common"
-        ])
+# -------- Row Compare (auto) --------
 
-        with tab1:
-            d1 = pd.DataFrame({col1: only1})
-            st.dataframe(d1)
+st.subheader("🧾 Row Difference (Auto All Common Columns)")
 
-        with tab2:
-            d2 = pd.DataFrame({col2: only2})
-            st.dataframe(d2)
+common_cols = list(set(df1.columns) & set(df2.columns))
 
-        with tab3:
-            d3 = pd.DataFrame({"Common": common})
-            st.dataframe(d3)
+if st.button("Compare Full Rows"):
 
-        # -------- DOWNLOAD --------
+    r1 = df1[common_cols].astype(str)
+    r2 = df2[common_cols].astype(str)
 
-        out = pd.concat([
-            pd.DataFrame({"Only_File1": only1}),
-            pd.DataFrame({"Only_File2": only2})
-        ], axis=1)
+    merged = r1.merge(r2, how="outer", indicator=True)
+    diff = merged[merged["_merge"] != "both"]
 
-        st.download_button(
-            "⬇ Download Difference Excel",
-            out.to_csv(index=False),
-            file_name="difference.csv"
-        )
-
-else:
-    st.info("Upload both Excel files to begin.")
+    st.metric("Row Differences", len(diff))
+    st.dataframe(diff)
 
