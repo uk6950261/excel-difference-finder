@@ -1,6 +1,11 @@
 import streamlit as st
+
+st.set_page_config(page_title="Excel Difference ULTRA", layout="wide")
+
 st.markdown("""
+<head>
 <meta name="google-site-verification" content="RL50Ymf_K5HFmDukgYPEKxwVD-UHlvx659nLZLlsGQ4" />
+</head>
 """, unsafe_allow_html=True)
 import pandas as pd
 import difflib
